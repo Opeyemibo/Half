@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offline Novel Manager</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; height: 100vh; display: flex; background-color: #1e1e1e; color: #f0f0f0; }
+    .sidebar { background-color: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; padding: 8px; }
+    #leftSidebar { width: 220px; }
+    #rightSidebar { width: 350px; }
+    #mainContent { flex: 1; padding: 16px; display: flex; flex-direction: column; overflow: hidden; }
+    .sidebar-header { font-weight: bold; margin-bottom: 8px; padding: 4px 4px 8px 4px; border-bottom: 1px solid #333; }
+    .list { flex: 1; overflow-y: auto; margin-bottom: 8px; }
+    .list-item { padding: 6px 8px; margin-bottom: 4px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; background-color: #2d2d30; transition: background-color 0.15s; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .list-item:hover { background-color: #3a3a3d; }
+    .list-item.active { background-color: #007acc; }
+    .list-item-title { font-weight: bold; margin-bottom: 2px; }
+    .list-item-subtitle { font-size: 0.8rem; color: #bbbbbb; }
+    .list-item-content { flex: 1; cursor: pointer; }
+    .list-item-delete-btn { background-color: #d73a49; padding: 4px 8px; font-size: 0.85rem; flex-shrink: 0; cursor: pointer; border: none; border-radius: 3px; color: white; }
+    .list-item-delete-btn:hover { background-color: #f85149; }
+    button { background-color: #0e639c; color: #ffffff; border: none; padding: 8px 10px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
+    button:hover { background-color: #1177bb; }
+    .btn-secondary { background-color: #3a3a3a; }
+    .btn-secondary:hover { background-color: #4a4a4a; }
+    .bottom-area { border-top: 1px solid #333; padding-top: 8px; }
+    .bottom-area button { width: 100%; }
+    #mainHeader { font-size: 1.2rem; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+    #mainBody { flex: 1; overflow-y: auto; }
+    .info-text { color: #aaaaaa; font-size: 0.95rem; line-height: 1.5; }
+    .section { margin-bottom: 16px; }
+    .section-title { font-weight: bold; margin-bottom: 8px; font-size: 1rem; }
+    .field-group { margin-bottom: 10px; display: flex; flex-direction: column; }
+    .field-group label { margin-bottom: 4px; font-size: 0.9rem; }
+    .field-group input, .field-group textarea { background-color: #1e1e1e; border: 1px solid #555; border-radius: 4px; color: #f0f0f0; padding: 6px; font-size: 0.9rem; }
+    .field-group textarea { resize: vertical; min-height: 150px; max-height: 400px; line-height: 1.4; }
+    .button-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .chapter-display-number { font-size: 0.9rem; color: #bbbbbb; margin-bottom: 4px; }
+    .chapter-display-title { font-size: 1.4rem; font-weight: bold; margin-bottom: 10px; }
+    .chapter-display-content { white-space: pre-wrap; line-height: 1.6; font-size: 0.95rem; }
+    @media (max-width: 900px) {
+      body { flex-direction: column; }
+      #leftSidebar { width: 100%; border-right: none; border-bottom: 1px solid #333; flex: 0 0 auto; }
+      #rightSidebar { display: none; }
+      #mainContent { flex: 1; padding: 12px; }
+      .bottom-area { display: none; }
+      .pc-only { display: none; }
+      .field-group textarea { min-height: 100px; max-height: 250px; }
+      button { padding: 6px 8px; font-size: 0.85rem; }
+    }
+  </style>
+</head>
+<body>
+  <div id="leftSidebar" class="sidebar">
+    <div class="sidebar-header">Novels</div>
+    <div id="novelList" class="list"></div>
+    <div class="bottom-area"><button id="newNovelBtn">+ New Novel</button></div>
+  </div>
+  <div id="rightSidebar" class="sidebar">
+    <div class="sidebar-header" id="chapterSidebarTitle">Chapters</div>
+    <div id="chapterList" class="list"></div>
+  </div>
+  <div id="mainContent">
+    <div id="mainHeader">Offline Novel Manager</div>
+    <div id="mainBody"><p class="info-text pc-only">Select a novel from the left sidebar.</p></div>
+  </div>
+  <script>
+    const STORAGE_KEY = "offline_novel_manager_data_v1";
+    const isMobile = window.innerWidth <= 900;
+    let data = { novels: [] };
+    let selectedNovelIndex = null;
+    let selectedChapterIndex = null;
+    function loadData() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        console.error("Failed to parse stored data:", e);
+      }
+    }
+    function saveData() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+    const novelListEl = document.getElementById("novelList");
+    const chapterListEl = document.getElementById("chapterList");
+    const newNovelBtn = document.getElementById("newNovelBtn");
+    const mainHeaderEl = document.getElementById("mainHeader");
+    const mainBodyEl = document.getElementById("mainBody");
+    const chapterSidebarTitleEl = document.getElementById("chapterSidebarTitle");
+    
+    function renderNovels() {
+      novelListEl.innerHTML = "";
+      if (data.novels.length === 0) {
+        const emptyMsg = document.createElement("div");
+        emptyMsg.className = "info-text";
+        emptyMsg.style.padding = "4px";
+        emptyMsg.textContent = "No novels yet";
+        novelListEl.appendChild(emptyMsg);
+        return;
+      }
+      data.novels.forEach((novel, index) => {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        if (index === selectedNovelIndex) item.classList.add("active");
+        const contentDiv = document.createElement("div");
+        contentDiv.className = "list-item-content";
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "list-item-title";
+        titleDiv.textContent = novel.name || "Untitled Novel";
+        const subtitleDiv = document.createElement("div");
+        subtitleDiv.className = "list-item-subtitle";
+        const count = novel.chapters ? novel.chapters.length : 0;
+        subtitleDiv.textContent = count + (count === 1 ? " chapter" : " chapters");
+        contentDiv.appendChild(titleDiv);
+        contentDiv.appendChild(subtitleDiv);
+        contentDiv.addEventListener("click", () => selectNovel(index));
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "list-item-delete-btn";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          deleteNovel(index);
+        });
+        item.appendChild(contentDiv);
+        item.appendChild(deleteBtn);
+        novelListEl.appendChild(item);
+      });
+    }
+    function renderChapters() {
+      chapterListEl.innerHTML = "";
+      if (selectedNovelIndex === null || data.novels.length === 0) {
+        chapterSidebarTitleEl.textContent = "Chapters";
+        const msg = document.createElement("div");
+        msg.className = "info-text";
+        msg.style.padding = "4px";
+        msg.textContent = "Select a novel";
+        chapterListEl.appendChild(msg);
+        return;
+      }
+      const novel = data.novels[selectedNovelIndex];
+      chapterSidebarTitleEl.textContent = `Chapters – ${novel.name || "Untitled"}`;
+      if (!novel.chapters || novel.chapters.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "info-text";
+        empty.style.padding = "4px";
+        empty.textContent = "No chapters";
+        chapterListEl.appendChild(empty);
+        return;
+      }
+      novel.chapters.forEach((chapter, idx) => {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        if (idx === selectedChapterIndex) item.classList.add("active");
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "list-item-title";
+        titleDiv.textContent = "Chapter " + (chapter.chapterNumber || (idx + 1)) + (chapter.chapterTitle ? `: ${chapter.chapterTitle}` : "");
+        const snippetDiv = document.createElement("div");
+        snippetDiv.className = "list-item-subtitle";
+        const snippet = (chapter.content || "").slice(0, 40);
+        snippetDiv.textContent = snippet ? snippet + "…" : "No content";
+        item.appendChild(titleDiv);
+        item.appendChild(snippetDiv);
+        item.addEventListener("click", () => selectChapter(idx));
+        chapterListEl.appendChild(item);
+      });
+    }
+    function selectNovel(index) {
+      selectedNovelIndex = index;
+      selectedChapterIndex = null;
+      renderNovels();
+      renderChapters();
+      isMobile ? showMobileChaptersView() : showAddChapterView();
+    }
+    function selectChapter(chapterIndex) {
+      selectedChapterIndex = chapterIndex;
+      renderChapters();
+      showChapterReadOnlyView();
+    }
+    function deleteNovel(index) {
+      const novel = data.novels[index];
+      if (confirm(`Delete "${novel.name || "Untitled"}"?`)) {
+        data.novels.splice(index, 1);
+        saveData();
+        if (selectedNovelIndex === index) {
+          selectedNovelIndex = null;
+          selectedChapterIndex = null;
+          mainBodyEl.innerHTML = "<p class='info-text'>Novel deleted.</p>";
+        } else if (selectedNovelIndex > index) {
+          selectedNovelIndex--;
+        }
+        renderNovels();
+        renderChapters();
+      }
+    }
+    function clearMainBody() {
+      mainBodyEl.innerHTML = "";
+    }
+    function showMobileChaptersView() {
+      if (selectedNovelIndex === null) return;
+      const novel = data.novels[selectedNovelIndex];
+      mainHeaderEl.textContent = novel.name || "Untitled";
+      clearMainBody();
+      if (!novel.chapters || novel.chapters.length === 0) {
+        mainBodyEl.innerHTML = "<div class='info-text' style='padding:12px'>No chapters</div>";
+        return;
+      }
+      novel.chapters.forEach((chapter, idx) => {
+        const card = document.createElement("div");
+        card.style.cssText = "cursor:pointer;padding:12px;background:#2d2d30;border-radius:4px;margin-bottom:8px";
+        const title = document.createElement("div");
+        title.className = "list-item-title";
+        title.textContent = "Chapter " + (chapter.chapterNumber || (idx + 1)) + (chapter.chapterTitle ? `: ${chapter.chapterTitle}` : "");
+        const snippet = document.createElement("div");
+        snippet.className = "list-item-subtitle";
+        snippet.style.marginTop = "4px";
+        const content = (chapter.content || "").slice(0, 50);
+        snippet.textContent = content ? content + "…" : "No content";
+        card.appendChild(title);
+        card.appendChild(snippet);
+        card.addEventListener("click", () => selectChapter(idx));
+        mainBodyEl.appendChild(card);
+      });
+    }
+    function showAddChapterView() {
+      if (selectedNovelIndex === null) {
+        mainHeaderEl.textContent = "Offline Novel Manager";
+        clearMainBody();
+        return;
+      }
+      mainHeaderEl.textContent = `Novel: ${data.novels[selectedNovelIndex].name || "Untitled"} – Add Chapter`;
+      clearMainBody();
+      const addSection = document.createElement("div");
+      addSection.className = "section";
+      const title = document.createElement("div");
+      title.className = "section-title";
+      title.textContent = "Add Chapter";
+      addSection.appendChild(title);
+      const numberGroup = document.createElement("div");
+      numberGroup.className = "field-group";
+      const numberLabel = document.createElement("label");
+      numberLabel.textContent = "Chapter Number";
+      const numberInput = document.createElement("input");
+      numberInput.type = "text";
+      numberInput.placeholder = "e.g. 1";
+      numberGroup.appendChild(numberLabel);
+      numberGroup.appendChild(numberInput);
+      const titleGroup = document.createElement("div");
+      titleGroup.className = "field-group";
+      const titleLabel = document.createElement("label");
+      titleLabel.textContent = "Chapter Title";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.placeholder = "e.g. Awakening";
+      titleGroup.appendChild(titleLabel);
+      titleGroup.appendChild(titleInput);
+      const contentGroup = document.createElement("div");
+      contentGroup.className = "field-group";
+      const contentLabel = document.createElement("label");
+      contentLabel.textContent = "Content";
+      const contentTextarea = document.createElement("textarea");
+      contentTextarea.placeholder = "Write your chapter content here...";
+      contentGroup.appendChild(contentLabel);
+      contentGroup.appendChild(contentTextarea);
+      const buttonRow = document.createElement("div");
+      buttonRow.className = "button-row";
+      const saveBtn = document.createElement("button");
+      saveBtn.textContent = "Save Chapter";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.className = "btn-secondary";
+      buttonRow.appendChild(saveBtn);
+      buttonRow.appendChild(cancelBtn);
+      addSection.appendChild(numberGroup);
+      addSection.appendChild(titleGroup);
+      addSection.appendChild(contentGroup);
+      addSection.appendChild(buttonRow);
+      mainBodyEl.appendChild(addSection);
+      saveBtn.addEventListener("click", () => {
+        const chapterNumber = numberInput.value.trim();
+        const chapterTitle = titleInput.value.trim();
+        const content = contentTextarea.value.trim();
+        if (!chapterNumber && !chapterTitle && !content) {
+          alert("Please enter chapter information");
+          return;
+        }
+        const novel = data.novels[selectedNovelIndex];
+        if (!novel.chapters) novel.chapters = [];
+        novel.chapters.push({ chapterNumber, chapterTitle, content });
+        saveData();
+        renderChapters();
+        selectedChapterIndex = novel.chapters.length - 1;
+        renderChapters();
+        showChapterReadOnlyView();
+      });
+      cancelBtn.addEventListener("click", () => {
+        numberInput.value = "";
+        titleInput.value = "";
+        contentTextarea.value = "";
+      });
+    }
+    function showChapterReadOnlyView() {
+      if (selectedNovelIndex === null || selectedChapterIndex === null || !data.novels[selectedNovelIndex] || !data.novels[selectedNovelIndex].chapters[selectedChapterIndex]) {
+        return;
+      }
+      const novel = data.novels[selectedNovelIndex];
+      const chapter = novel.chapters[selectedChapterIndex];
+      mainHeaderEl.textContent = isMobile ? (novel.name || "Untitled") : `Novel: ${novel.name || "Untitled"}`;
+      clearMainBody();
+      const container = document.createElement("div");
+      container.className = "section";
+      const numDiv = document.createElement("div");
+      numDiv.className = "chapter-display-number";
+      numDiv.textContent = "Chapter " + (chapter.chapterNumber || (selectedChapterIndex + 1));
+      const titleDiv = document.createElement("div");
+      titleDiv.className = "chapter-display-title";
+      titleDiv.textContent = chapter.chapterTitle || "";
+      const contentDiv = document.createElement("div");
+      contentDiv.className = "chapter-display-content";
+      contentDiv.textContent = chapter.content || "[No content]";
+      container.appendChild(numDiv);
+      if (chapter.chapterTitle) container.appendChild(titleDiv);
+      container.appendChild(contentDiv);
+      mainBodyEl.appendChild(container);
+      const backSection = document.createElement("div");
+      backSection.className = "section";
+      const backBtn = document.createElement("button");
+      backBtn.textContent = isMobile ? "Back to Chapters" : "Add Another Chapter";
+      backBtn.addEventListener("click", () => {
+        selectedChapterIndex = null;
+        renderChapters();
+        isMobile ? showMobileChaptersView() : showAddChapterView();
+      });
+      backSection.appendChild(backBtn);
+      mainBodyEl.appendChild(backSection);
+    }
+    newNovelBtn.addEventListener("click", () => {
+      const name = window.prompt("Enter the novel's name:");
+      if (name === null) return;
+      const novelName = name.trim() || "Untitled Novel";
+      data.novels.push({ name: novelName, chapters: [] });
+      saveData();
+      selectedNovelIndex = data.novels.length - 1;
+      selectedChapterIndex = null;
+      renderNovels();
+      renderChapters();
+      showAddChapterView();
+    });
+    loadData();
+    renderNovels();
+    renderChapters();
+  </script>
+</body>
+</html>
+
+
+
+<!-- Improve the CSS styling for the mobile version to prevent overlapping elements. Ensure that clicking on the novel name correctly navigates to the associated chapters, avoiding any misdirection or non-functionality. Provide a fully functional, finished mobile reader interface that displays a list of novels, including a search input labeled "Search novels..."., and a section titled "Novel: OKay – Add Chapter." Incorporate an image placeholder or upload functionality next to the novel name to allow users to add an image. Design the layout exclusively for reader use, with a clean, responsive appearance suitable for mobile screens, ensuring no overlap or layout issues. Exclude any writing or editing functionalities; present only the finalized reader view as the completed product.   for testing.html under Geometry folder -->
